@@ -1,3 +1,7 @@
+# Zig build artifacts
 .zig-cache/
 zig-out/
 *.o
+
+# Ignore the compiled main binary (generated during local builds)
+src/main
