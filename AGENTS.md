@@ -1,0 +1,21 @@
+AGENTS guide for this repo (Zig 0.15.2+)
+- Build (installs to zig-out/bin): zig build
+- Run binary with args: zig build run -- [args]
+- Run all tests: zig build test
+- Run a single test (by file/name):
+  - zig test src/root.zig --test-filter "basic add functionality"
+  - zig test src/main.zig --test-filter "simple test"
+- Fuzz the provided fuzz test: zig test src/main.zig --fuzz
+- Format check: zig fmt --check .   Fix: zig fmt .
+- Imports: use @import("std") and the local module via @import("eapolinario_zzd"); keep aliases concise (e.g., std, eapolinario_zzd).
+- Naming: Types (struct/enum/union/error sets) UpperCamelCase; functions, variables, and consts lowerCamelCase; avoid ALL_CAPS.
+- Types: prefer explicit intent; use usize for lengths/indices; cast intentionally with @as (and related helpers) near the use site.
+- Errors: prefer error unions; propagate with try; catch only to add context; avoid unreachable panics in library code.
+- Resource cleanup: prefer defer/errdefer; when using std.ArrayList or allocators, always deinit in a defer (see tests).
+- Testing: use std.testing.expect/expectEqual; avoid global state between tests; keep tests small and deterministic (except fuzz).
+- Formatting/style: rely on zig fmt; use trailing commas for stable diffs; keep line length reasonable; one declaration per line.
+- Modules/build: add modules in build.zig; expose public API from src/root.zig; CLI entry in src/main.zig.
+- IO: write via buffered stdout writers and flush (see bufferedPrint in src/root.zig).
+- Profiles: for stricter checks run in safer modes, e.g., zig build -Doptimize=ReleaseSafe.
+- Housekeeping: don’t commit zig-out/ artifacts; run format and tests before sending changes.
+- Dependencies: manage with build.zig.zon; fetch via zig build --fetch when needed.
