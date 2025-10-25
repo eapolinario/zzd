@@ -98,13 +98,18 @@ pub fn hexdump(reader_any: anytype, writer_any: anytype, opts: Options) !void {
                     const b = chunk[idx + i];
                     try writeHex2(w, b, opts.uppercase);
                 } else {
+                    // pad for a missing byte: two spaces representing two hex digits
                     try w.writeAll("  ");
                 }
-                // spacing after each byte
-                try w.writeByte(' ');
-                if (group > 1 and ((i + 1) % group == 0)) {
+                // Insert a single space only after completing a group.
+                if (((i + 1) % group) == 0) {
                     try w.writeByte(' ');
                 }
+            }
+            // Ensure at least one space separates hex column and ASCII gutter
+            // when the last group does not end exactly at the column boundary.
+            if ((cols % group) != 0) {
+                try w.writeByte(' ');
             }
 
             // ASCII gutter
@@ -181,4 +186,204 @@ test "hexdump 2 cols uppercase simple" {
     const got = list.items;
     const expected = "00000000: 20 7E | ~|\n";
     try std.testing.expectEqualStrings(expected, got);
+}
+
+// Confirms that -g (grouping) prints contiguous bytes per group and a
+// single space between groups (no spaces within a group).
+// Expected for 16 bytes (0x00..0x0f) with group=2:
+// "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f |................|\n"
+// Note: This will currently FAIL until the implementation is fixed to
+// avoid per-byte spacing and instead insert a single space only between groups.
+test "hexdump grouping group=2 produces contiguous 2-byte groups with single inter-group spaces" {
+    var data: [16]u8 = undefined;
+    for (&data, 0..) |*b, i| b.* = @as(u8, @intCast(i));
+
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    const lw = list.writer(std.testing.allocator);
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    var r = SliceReader{ .buf = data[0..] };
+    try hexdump(&r, lw, .{ .group = 2 });
+
+    const got = list.items;
+    const expected =
+        "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f |................|\n";
+    try std.testing.expectEqualStrings(expected, got);
+}
+
+test "hexdump grouping various -g values: 1,2,3,4,16" {
+    var data: [16]u8 = undefined;
+    for (&data, 0..) |*b, i| b.* = @as(u8, @intCast(i));
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    // g=1 (default spacing between single bytes)
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 1 });
+        try std.testing.expectEqualStrings(
+            "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f |................|\n",
+            list.items,
+        );
+    }
+
+    // g=2
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 2 });
+        try std.testing.expectEqualStrings(
+            "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f |................|\n",
+            list.items,
+        );
+    }
+
+    // g=3
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 3 });
+        try std.testing.expectEqualStrings(
+            "00000000: 000102 030405 060708 090a0b 0c0d0e 0f |................|\n",
+            list.items,
+        );
+    }
+
+    // g=4
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 4 });
+        try std.testing.expectEqualStrings(
+            "00000000: 00010203 04050607 08090a0b 0c0d0e0f |................|\n",
+            list.items,
+        );
+    }
+
+    // g=16 (one full group per line)
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 16 });
+        try std.testing.expectEqualStrings(
+            "00000000: 000102030405060708090a0b0c0d0e0f |................|\n",
+            list.items,
+        );
+    }
+}
+
+test "hexdump partial final line padding aligns for -g values: 1,2,3,4,16 (13 bytes)" {
+    // 13 bytes: 0x00..0x0c
+    var data: [13]u8 = undefined;
+    for (&data, 0..) |*b, i| b.* = @as(u8, @intCast(i));
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    // g=1
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 1 });
+        try std.testing.expectEqualStrings(
+            "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c          |.............|\n",
+            list.items,
+        );
+    }
+
+    // g=2
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 2 });
+        try std.testing.expectEqualStrings(
+            "00000000: 0001 0203 0405 0607 0809 0a0b 0c        |.............|\n",
+            list.items,
+        );
+    }
+
+    // g=3
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 3 });
+        try std.testing.expectEqualStrings(
+            "00000000: 000102 030405 060708 090a0b 0c        |.............|\n",
+            list.items,
+        );
+    }
+
+    // g=4
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 4 });
+        try std.testing.expectEqualStrings(
+            "00000000: 00010203 04050607 08090a0b 0c       |.............|\n",
+            list.items,
+        );
+    }
+
+    // g=16
+    {
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(std.testing.allocator);
+        const lw = list.writer(std.testing.allocator);
+        var r = SliceReader{ .buf = data[0..] };
+        try hexdump(&r, lw, .{ .group = 16 });
+        try std.testing.expectEqualStrings(
+            "00000000: 000102030405060708090a0b0c       |.............|\n",
+            list.items,
+        );
+    }
 }
