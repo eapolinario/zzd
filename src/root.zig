@@ -18,6 +18,7 @@ pub const Options = struct {
     limit: ?usize = null, // total bytes to process
     skip: usize = 0, // bytes to skip from input before dumping
     verbose: bool = false, // reserved for future; no autoskip in M1
+    colorize: bool = false, // -R: colorize output per byte class
 };
 
 fn isPrintableAscii(b: u8) bool {
@@ -41,6 +42,32 @@ fn writeHex8(w: anytype, value: usize, uppercase: bool) !void {
         const nib: u8 = @intCast((@as(u64, value) >> shift) & 0x0f);
         try w.writeByte(digits[nib]);
     }
+}
+
+// ANSI color helpers and mapping for -R
+const SGR = struct {
+    pub const reset = "\x1b[0m";
+    pub const white = "\x1b[97m"; // bright white
+    pub const blue = "\x1b[94m"; // bright blue
+    pub const green = "\x1b[32m";
+    pub const red = "\x1b[31m";
+    pub const yellow = "\x1b[33m";
+};
+
+fn colorForByte(b: u8) []const u8 {
+    if (b == 0x00) return SGR.white;
+    if (b == 0xff) return SGR.blue;
+    if (b == 0x09 or b == 0x0a or b == 0x0d) return SGR.yellow; // tab, LF, CR
+    if (isPrintableAscii(b)) return SGR.green;
+    return SGR.red;
+}
+
+inline fn writeColoredBegin(w: anytype, color: []const u8, enabled: bool) !void {
+    if (enabled) try w.writeAll(color);
+}
+
+inline fn writeColoredEnd(w: anytype, enabled: bool) !void {
+    if (enabled) try w.writeAll(SGR.reset);
 }
 
 // Discard up to `n` bytes from reader.
@@ -96,7 +123,10 @@ pub fn hexdump(reader_any: anytype, writer_any: anytype, opts: Options) !void {
             while (i < cols) : (i += 1) {
                 if (i < line_len) {
                     const b = chunk[idx + i];
+                    const color = colorForByte(b);
+                    try writeColoredBegin(w, color, opts.colorize);
                     try writeHex2(w, b, opts.uppercase);
+                    try writeColoredEnd(w, opts.colorize);
                 } else {
                     // pad for a missing byte: two spaces representing two hex digits
                     try w.writeAll("  ");
@@ -118,7 +148,10 @@ pub fn hexdump(reader_any: anytype, writer_any: anytype, opts: Options) !void {
             while (i < line_len) : (i += 1) {
                 const b = chunk[idx + i];
                 const ch: u8 = if (isPrintableAscii(b)) b else '.';
+                const color = colorForByte(b);
+                try writeColoredBegin(w, color, opts.colorize);
                 try w.writeByte(ch);
+                try writeColoredEnd(w, opts.colorize);
             }
             try w.writeAll("|\n");
 
@@ -188,12 +221,6 @@ test "hexdump 2 cols uppercase simple" {
     try std.testing.expectEqualStrings(expected, got);
 }
 
-// Confirms that -g (grouping) prints contiguous bytes per group and a
-// single space between groups (no spaces within a group).
-// Expected for 16 bytes (0x00..0x0f) with group=2:
-// "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f |................|\n"
-// Note: This will currently FAIL until the implementation is fixed to
-// avoid per-byte spacing and instead insert a single space only between groups.
 test "hexdump grouping group=2 produces contiguous 2-byte groups with single inter-group spaces" {
     var data: [16]u8 = undefined;
     for (&data, 0..) |*b, i| b.* = @as(u8, @intCast(i));
@@ -386,4 +413,161 @@ test "hexdump partial final line padding aligns for -g values: 1,2,3,4,16 (13 by
             list.items,
         );
     }
+}
+
+// Minimal colorization test to ensure escape codes are emitted when enabled
+// Colors:
+//  - 0x00 => white
+//  - printable => green ('A')
+//  - 0xff => blue
+// ASCII gutter shows '.' for non-printables but still colorizes per byte value
+test "hexdump colorize -R basic mapping" {
+    const input: [3]u8 = .{ 0x00, 0x41, 0xff }; // NUL, 'A', 0xFF
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    const lw = list.writer(std.testing.allocator);
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    var r = SliceReader{ .buf = input[0..] };
+    try hexdump(&r, lw, .{ .cols = 3, .colorize = true });
+
+    const RESET = "\x1b[0m";
+    const W = "\x1b[97m"; // 0x00
+    const G = "\x1b[32m"; // 'A'
+    const B = "\x1b[94m"; // 0xff
+
+    const expected =
+        "00000000: " ++
+        W ++ "00" ++ RESET ++ " " ++
+        G ++ "41" ++ RESET ++ " " ++
+        B ++ "ff" ++ RESET ++ " |" ++
+        W ++ "." ++ RESET ++
+        G ++ "A" ++ RESET ++
+        B ++ "." ++ RESET ++ "|\n";
+
+    const got = list.items;
+    try std.testing.expectEqualStrings(expected, got);
+}
+
+// Cover yellow mapping for tabs and linebreaks (TAB, LF, CR)
+test "hexdump colorize mapping for TAB/LF/CR is yellow" {
+    const input: [3]u8 = .{ 0x09, 0x0a, 0x0d };
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    const lw = list.writer(std.testing.allocator);
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    var r = SliceReader{ .buf = input[0..] };
+    try hexdump(&r, lw, .{ .cols = 3, .colorize = true });
+
+    const RESET = "\x1b[0m";
+    const Y = "\x1b[33m";
+
+    const expected =
+        "00000000: " ++
+        Y ++ "09" ++ RESET ++ " " ++
+        Y ++ "0a" ++ RESET ++ " " ++
+        Y ++ "0d" ++ RESET ++ " |" ++
+        Y ++ "." ++ RESET ++
+        Y ++ "." ++ RESET ++
+        Y ++ "." ++ RESET ++ "|\n";
+
+    const got = list.items;
+    try std.testing.expectEqualStrings(expected, got);
+}
+
+// Cover red mapping for generic non-printable and verify green for printable
+test "hexdump colorize mapping: non-printable red, printable green" {
+    const input: [2]u8 = .{ 0x01, 0x41 };
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    const lw = list.writer(std.testing.allocator);
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    var r = SliceReader{ .buf = input[0..] };
+    try hexdump(&r, lw, .{ .cols = 2, .colorize = true });
+
+    const RESET = "\x1b[0m";
+    const R = "\x1b[31m";
+    const G = "\x1b[32m";
+
+    const expected =
+        "00000000: " ++
+        R ++ "01" ++ RESET ++ " " ++
+        G ++ "41" ++ RESET ++ " |" ++
+        R ++ "." ++ RESET ++
+        G ++ "A" ++ RESET ++ "|\n";
+
+    const got = list.items;
+    try std.testing.expectEqualStrings(expected, got);
+}
+
+// Cover uppercase hex with colorization unaffected
+test "hexdump colorize with uppercase hex digits" {
+    const input: [2]u8 = .{ 0x0a, 0xff };
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(std.testing.allocator);
+    const lw = list.writer(std.testing.allocator);
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    var r = SliceReader{ .buf = input[0..] };
+    try hexdump(&r, lw, .{ .cols = 2, .uppercase = true, .colorize = true });
+
+    const RESET = "\x1b[0m";
+    const Y = "\x1b[33m";
+    const B = "\x1b[94m";
+
+    const expected =
+        "00000000: " ++
+        Y ++ "0A" ++ RESET ++ " " ++
+        B ++ "FF" ++ RESET ++ " |" ++
+        Y ++ "." ++ RESET ++
+        B ++ "." ++ RESET ++ "|\n";
+
+    const got = list.items;
+    try std.testing.expectEqualStrings(expected, got);
 }
