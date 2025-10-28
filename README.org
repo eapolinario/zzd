@@ -92,9 +92,6 @@ zig build test
 zig test src/root.zig --test-filter "basic add functionality"
 zig test src/main.zig --test-filter "simple test"
 
-# Fuzz harness (where supported)
-zig test src/main.zig --fuzz
-
 # Format check (CI-friendly); fix with `zig fmt .`
 zig fmt --check .
 #+end_src
