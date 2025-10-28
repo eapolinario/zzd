@@ -1,0 +1,117 @@
+#+title: zzd — Educational xxd in Zig (alpha)
+#+options: toc:t
+
+* 🚧 WARNING: Educational, alpha-quality software
+This project is a learning exercise: a from-scratch reimplementation of the classic
+=xxd= hexdump tool in Zig. It is not polished, not feature-complete, and not intended
+for production use. Expect missing features and rough edges; verify behavior on
+throwaway copies of data first.
+
+- No affiliation with the original =xxd= authors or the Vim project.
+- Interfaces and output may change at any time.
+
+* What is this?
+=zzd= aims to provide a small, readable, and well-tested Zig implementation of
+=xxd='s hexdump view, with an intentionally limited feature set to keep the code
+approachable for study. The goal is to demonstrate idiomatic Zig patterns (error
+handling, testing, streaming I/O) while leaving room to grow toward compatibility.
+
+* Status
+Alpha (as of 2025-10-28). Milestone M1 functionality is the current target; see
+Roadmap for what’s next.
+
+* Requirements
+- Zig 0.15.2 or newer.
+
+* Build and run
+#+begin_src sh
+# Build the binary (installs to zig-out/bin)
+zig build
+
+# Run via the build system
+zig build run -- [options] [infile [outfile]]
+#+end_src
+
+If no =infile= is given, input is read from stdin. If =outfile= is given, output
+is written to that path; otherwise to stdout.
+
+* Usage
+Initial feature set (M1): hexdump view with offsets, grouped hex bytes, and an
+ASCII gutter. Defaults: 16 bytes per line, lowercase hex; printable bytes (32..126)
+render as themselves, otherwise =.=.
+
+Supported options:
+- =-c <cols>= :: bytes per line (e.g., 8, 16, 32).
+- =-g <n>=    :: bytes per group (1, 2, 4, 8); inserts a space between groups.
+- =-u=        :: uppercase hex digits.
+- =-l <len>=  :: limit total bytes processed.
+- =-s <off>=  :: seek/skip input bytes before dumping; decimal or =0x...=.
+- =-v=        :: verbose; do not compress repeated blank lines (no =*= elision in M1).
+- =--help=    :: print usage and exit.
+
+* Examples
+#+begin_src sh
+# Dump a file
+zig build run -- README.org
+
+# 8 bytes per line, uppercase hex
+zig build run -- -c 8 -u src/root.zig
+
+# Limit to 64 bytes
+zig build run -- -l 64 /bin/ls
+
+# Read from stdin
+printf 'hello' | zig build run --
+#+end_src
+
+* Roadmap
+- M1 (current): core hexdump with =-c=, =-g=, =-u=, =-l=, =-s=, =-v=.
+- M2 (planned):
+  - =-p=: plain continuous hex (no offsets/ASCII).
+  - =-r=: reverse (hex back to binary), interoperates with =-p=.
+  - Additional formats (e.g., =-i= C include), optional autoskip (=*=), etc.
+
+* Project layout
+- =src/root.zig=: library surface; exposes a =hexdump= function that writes to any
+  =std.io.Writer= for testability.
+- =src/main.zig=: CLI entry point and argument parsing/IO.
+
+* Testing and quality
+#+begin_src sh
+# All tests
+zig build test
+
+# Run a single test by filter
+zig test src/root.zig --test-filter "basic add functionality"
+zig test src/main.zig --test-filter "simple test"
+
+# Fuzz harness (where supported)
+zig test src/main.zig --fuzz
+
+# Format check (CI-friendly); fix with `zig fmt .`
+zig fmt --check .
+#+end_src
+
+Guidelines (used throughout the code):
+- Use =@import("std")= and the local module via =@import("eapolinario_zzd")=.
+- Naming: types UpperCamelCase; functions/vars consts lowerCamelCase.
+- Prefer explicit intent; =usize= for lengths/indices; cast with =@as= near use.
+- Errors: prefer error unions; =try= to propagate; add context on =catch=; avoid
+  unreachable panics in library code.
+- Resource cleanup: =defer/errdefer=; always =deinit= containers.
+- IO/perf: buffered readers/writers; process in fixed-size chunks; no globals.
+
+* Contributing
+Issues and PRs welcome! Please:
+- Keep changes small and focused; include tests when feasible.
+- Run =zig fmt= and =zig build test= before sending changes.
+- Favor clarity over cleverness; add comments where behavior may surprise.
+
+* License
+This project is released under *The Unlicense* (public domain dedication). See
+=LICENSE= for the full text. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY
+OF ANY KIND.
+
+* Acknowledgements
+Inspired by the classic =xxd= utility and the broader Unix tool ecosystem. This
+project is independent and for educational purposes only.
