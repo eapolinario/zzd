@@ -36,14 +36,15 @@ If no =infile= is given, input is read from stdin. If =outfile= is given, output
 is written to that path; otherwise to stdout.
 
 * Usage
-Initial feature set (M1): hexdump view with offsets, grouped hex bytes, and an
-ASCII gutter. Defaults: 16 bytes per line, lowercase hex; printable bytes (32..126)
-render as themselves, otherwise =.=.
+Initial feature set (M1): hexdump view with offsets, grouped hex bytes, an ASCII
+gutter, and optional ANSI colorization (-R). Defaults: 16 bytes per line, lowercase
+hex; printable bytes (32..126) render as themselves, otherwise =.=.
 
 Supported options:
 - =-c <cols>= :: bytes per line (e.g., 8, 16, 32).
 - =-g <n>=    :: bytes per group (1, 2, 4, 8); inserts a space between groups.
 - =-u=        :: uppercase hex digits.
+- =-R <when>= :: colorize output by byte class; <when> is one of: =always=, =auto=, =never= (default: =auto=).  Mapping: 0x00 white, 0xff blue, printable green, non-printable red, TAB/LF/CR yellow. =NO_COLOR=1 disables colors by default (no effect when =-R= is present).
 - =-l <len>=  :: limit total bytes processed.
 - =-s <off>=  :: seek/skip input bytes before dumping; decimal or =0x...=.
 - =-v=        :: verbose; do not compress repeated blank lines (no =*= elision in M1).
@@ -62,10 +63,16 @@ zig build run -- -l 64 /bin/ls
 
 # Read from stdin
 printf 'hello' | zig build run --
+
+# Force colorization regardless of TTY and NO_COLOR
+zig build run -- -R always README.org
+
+# Disable colors by default via environment (no effect if -R is given)
+NO_COLOR=1 zig build run -- README.org
 #+end_src
 
 * Roadmap
-- M1 (current): core hexdump with =-c=, =-g=, =-u=, =-l=, =-s=, =-v=.
+- M1 (current): core hexdump with =-c=, =-g=, =-u=, =-l=, =-s=, =-v=, =-R=.
 - M2 (planned):
   - =-p=: plain continuous hex (no offsets/ASCII).
   - =-r=: reverse (hex back to binary), interoperates with =-p=.
