@@ -142,8 +142,8 @@ pub fn hexdump(reader_any: anytype, writer_any: anytype, opts: Options) !void {
                 try w.writeByte(' ');
             }
 
-            // ASCII gutter
-            try w.writeAll("|");
+            // ASCII characters (no surrounding bars)
+            try w.writeByte(' ');
             i = 0;
             while (i < line_len) : (i += 1) {
                 const b = chunk[idx + i];
@@ -153,7 +153,7 @@ pub fn hexdump(reader_any: anytype, writer_any: anytype, opts: Options) !void {
                 try w.writeByte(ch);
                 try writeColoredEnd(w, opts.colorize);
             }
-            try w.writeAll("|\n");
+            try w.writeByte('\n');
 
             idx += line_len;
             offset += line_len;
@@ -192,7 +192,7 @@ test "hexdump default 16 bytes lowercase" {
 
     const got = list.items;
     const expected =
-        "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f |................|\n";
+        "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f  ................\n";
     try std.testing.expectEqualStrings(expected, got);
 }
 
@@ -217,7 +217,7 @@ test "hexdump 2 cols uppercase simple" {
     var r = SliceReader{ .buf = input[0..] };
     try hexdump(&r, lw, .{ .cols = 2, .uppercase = true });
     const got = list.items;
-    const expected = "00000000: 20 7E | ~|\n";
+    const expected = "00000000: 20 7E   ~\n";
     try std.testing.expectEqualStrings(expected, got);
 }
 
@@ -246,7 +246,7 @@ test "hexdump grouping group=2 produces contiguous 2-byte groups with single int
 
     const got = list.items;
     const expected =
-        "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f |................|\n";
+        "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  ................\n";
     try std.testing.expectEqualStrings(expected, got);
 }
 
@@ -274,7 +274,7 @@ test "hexdump grouping various -g values: 1,2,3,4,16" {
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 1 });
         try std.testing.expectEqualStrings(
-            "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f |................|\n",
+            "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f  ................\n",
             list.items,
         );
     }
@@ -287,7 +287,7 @@ test "hexdump grouping various -g values: 1,2,3,4,16" {
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 2 });
         try std.testing.expectEqualStrings(
-            "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f |................|\n",
+            "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  ................\n",
             list.items,
         );
     }
@@ -300,7 +300,7 @@ test "hexdump grouping various -g values: 1,2,3,4,16" {
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 3 });
         try std.testing.expectEqualStrings(
-            "00000000: 000102 030405 060708 090a0b 0c0d0e 0f |................|\n",
+            "00000000: 000102 030405 060708 090a0b 0c0d0e 0f  ................\n",
             list.items,
         );
     }
@@ -313,7 +313,7 @@ test "hexdump grouping various -g values: 1,2,3,4,16" {
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 4 });
         try std.testing.expectEqualStrings(
-            "00000000: 00010203 04050607 08090a0b 0c0d0e0f |................|\n",
+            "00000000: 00010203 04050607 08090a0b 0c0d0e0f  ................\n",
             list.items,
         );
     }
@@ -326,7 +326,7 @@ test "hexdump grouping various -g values: 1,2,3,4,16" {
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 16 });
         try std.testing.expectEqualStrings(
-            "00000000: 000102030405060708090a0b0c0d0e0f |................|\n",
+            "00000000: 000102030405060708090a0b0c0d0e0f  ................\n",
             list.items,
         );
     }
@@ -357,7 +357,7 @@ test "hexdump partial final line padding aligns for -g values: 1,2,3,4,16 (13 by
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 1 });
         try std.testing.expectEqualStrings(
-            "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c          |.............|\n",
+            "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c           .............\n",
             list.items,
         );
     }
@@ -370,7 +370,7 @@ test "hexdump partial final line padding aligns for -g values: 1,2,3,4,16 (13 by
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 2 });
         try std.testing.expectEqualStrings(
-            "00000000: 0001 0203 0405 0607 0809 0a0b 0c        |.............|\n",
+            "00000000: 0001 0203 0405 0607 0809 0a0b 0c         .............\n",
             list.items,
         );
     }
@@ -383,7 +383,7 @@ test "hexdump partial final line padding aligns for -g values: 1,2,3,4,16 (13 by
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 3 });
         try std.testing.expectEqualStrings(
-            "00000000: 000102 030405 060708 090a0b 0c        |.............|\n",
+            "00000000: 000102 030405 060708 090a0b 0c         .............\n",
             list.items,
         );
     }
@@ -396,7 +396,7 @@ test "hexdump partial final line padding aligns for -g values: 1,2,3,4,16 (13 by
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 4 });
         try std.testing.expectEqualStrings(
-            "00000000: 00010203 04050607 08090a0b 0c       |.............|\n",
+            "00000000: 00010203 04050607 08090a0b 0c        .............\n",
             list.items,
         );
     }
@@ -409,7 +409,7 @@ test "hexdump partial final line padding aligns for -g values: 1,2,3,4,16 (13 by
         var r = SliceReader{ .buf = data[0..] };
         try hexdump(&r, lw, .{ .group = 16 });
         try std.testing.expectEqualStrings(
-            "00000000: 000102030405060708090a0b0c       |.............|\n",
+            "00000000: 000102030405060708090a0b0c        .............\n",
             list.items,
         );
     }
@@ -451,10 +451,10 @@ test "hexdump colorize -R basic mapping" {
         "00000000: " ++
         W ++ "00" ++ RESET ++ " " ++
         G ++ "41" ++ RESET ++ " " ++
-        B ++ "ff" ++ RESET ++ " |" ++
+        B ++ "ff" ++ RESET ++ "  " ++
         W ++ "." ++ RESET ++
         G ++ "A" ++ RESET ++
-        B ++ "." ++ RESET ++ "|\n";
+        B ++ "." ++ RESET ++ "\n";
 
     const got = list.items;
     try std.testing.expectEqualStrings(expected, got);
@@ -489,10 +489,10 @@ test "hexdump colorize mapping for TAB/LF/CR is yellow" {
         "00000000: " ++
         Y ++ "09" ++ RESET ++ " " ++
         Y ++ "0a" ++ RESET ++ " " ++
-        Y ++ "0d" ++ RESET ++ " |" ++
+        Y ++ "0d" ++ RESET ++ "  " ++
         Y ++ "." ++ RESET ++
         Y ++ "." ++ RESET ++
-        Y ++ "." ++ RESET ++ "|\n";
+        Y ++ "." ++ RESET ++ "\n";
 
     const got = list.items;
     try std.testing.expectEqualStrings(expected, got);
@@ -527,9 +527,9 @@ test "hexdump colorize mapping: non-printable red, printable green" {
     const expected =
         "00000000: " ++
         R ++ "01" ++ RESET ++ " " ++
-        G ++ "41" ++ RESET ++ " |" ++
+        G ++ "41" ++ RESET ++ "  " ++
         R ++ "." ++ RESET ++
-        G ++ "A" ++ RESET ++ "|\n";
+        G ++ "A" ++ RESET ++ "\n";
 
     const got = list.items;
     try std.testing.expectEqualStrings(expected, got);
@@ -564,9 +564,9 @@ test "hexdump colorize with uppercase hex digits" {
     const expected =
         "00000000: " ++
         Y ++ "0A" ++ RESET ++ " " ++
-        B ++ "FF" ++ RESET ++ " |" ++
+        B ++ "FF" ++ RESET ++ "  " ++
         Y ++ "." ++ RESET ++
-        B ++ "." ++ RESET ++ "|\n";
+        B ++ "." ++ RESET ++ "\n";
 
     const got = list.items;
     try std.testing.expectEqualStrings(expected, got);
