@@ -8,6 +8,7 @@ fn printUsage(stdout: anytype) !void {
             "  -c <cols>    bytes per line (default 16)\n" ++
             "  -g <n>       bytes per group: 1,2,4,8 (default 1)\n" ++
             "  -u           uppercase hex\n" ++
+            "  -r           reverse: convert hex dump/plain hex to binary (reads from stdin/file, writes raw bytes)\n" ++
             "  -R <when>    colorize output by byte class; <when> is one of: always, auto, never (default: auto)\n" ++
             "               Mapping: 0x00 white, 0xff blue, printable green, non-printable red, tab/LF/CR yellow\n" ++
             "               NO_COLOR=1 disables colors by default; it's a no-op when -R is present\n" ++
@@ -41,6 +42,7 @@ pub fn main() !void {
     _ = args.next();
 
     var opts: zzd.Options = .{};
+    var reverse_mode = false;
     var infile: ?[]const u8 = null;
     var outfile: ?[]const u8 = null;
     var files_only = false;
@@ -63,6 +65,8 @@ pub fn main() !void {
                 return;
             } else if (std.mem.eql(u8, arg, "-u")) {
                 opts.uppercase = true;
+            } else if (std.mem.eql(u8, arg, "-r")) {
+                reverse_mode = true;
             } else if (std.mem.eql(u8, arg, "-R")) {
                 const val = args.next() orelse return error.InvalidArgument;
                 if (std.ascii.eqlIgnoreCase(val, "always")) {
@@ -173,7 +177,11 @@ pub fn main() !void {
     };
     const w = &out_writer.interface;
 
-    try zzd.hexdump(in_file, w, opts);
+    if (reverse_mode) {
+        try zzd.reverse(in_file, w);
+    } else {
+        try zzd.hexdump(in_file, w, opts);
+    }
     try w.flush();
 }
 

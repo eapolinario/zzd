@@ -166,6 +166,199 @@ pub fn hexdump(reader_any: anytype, writer_any: anytype, opts: Options) !void {
     }
 }
 
+// Reverse: convert a hexdump (our formatted view) or plain hex stream into binary.
+// - Supports our formatted lines: "XXXXXXXX: <hex>  <ascii>"; only the hex area is parsed.
+// - Also supports plain hex with arbitrary whitespace/newlines; ignores non-hex characters.
+// Returns error.OddNibbleCount if an odd number of hex digits are present.
+pub fn reverse(reader_any: anytype, writer_any: anytype) !void {
+    var r = reader_any;
+    const w = writer_any;
+
+    var buf: [4096]u8 = undefined;
+    var have_high: bool = false;
+    var high_nib: u8 = 0;
+
+    // Helper to consume a nibble value into the output byte stream
+    const consumeNibble = struct {
+        fn go(val: u8, have_high_ptr: *bool, high_nib_ptr: *u8, writer: anytype) !void {
+            if (!have_high_ptr.*) {
+                high_nib_ptr.* = val;
+                have_high_ptr.* = true;
+            } else {
+                const byte: u8 = (@as(u8, high_nib_ptr.*) << 4) | val;
+                try writer.writeByte(byte);
+                have_high_ptr.* = false;
+            }
+        }
+    };
+
+    // Per-line state for formatted hexdump parsing / detection
+    var line_capturing_precolon: bool = true; // capturing potential offset prefix
+    var line_prefix: [64]u8 = undefined;
+    var line_prefix_len: usize = 0;
+    var formatted_after_colon: bool = false; // currently parsing hex area of formatted line
+    var space_run: u8 = 0; // consecutive spaces while in formatted hex area
+    var ignore_until_eol: bool = false; // once ASCII gutter starts, skip rest of line
+
+    while (true) {
+        const n = try r.read(&buf);
+        if (n == 0) break;
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const c = buf[i];
+
+            if (c == '\n') {
+                // If we buffered a line with no colon, treat buffered prefix as plain hex now.
+                if (line_capturing_precolon and !formatted_after_colon and !ignore_until_eol and line_prefix_len > 0) {
+                    var j: usize = 0;
+                    while (j < line_prefix_len) : (j += 1) {
+                        const pc = line_prefix[j];
+                        var valp: u8 = undefined;
+                        if (pc >= '0' and pc <= '9') {
+                            valp = pc - '0';
+                        } else if (pc >= 'a' and pc <= 'f') {
+                            valp = 10 + (pc - 'a');
+                        } else if (pc >= 'A' and pc <= 'F') {
+                            valp = 10 + (pc - 'A');
+                        } else {
+                            continue;
+                        }
+                        try consumeNibble.go(valp, &have_high, &high_nib, w);
+                    }
+                }
+                // reset line state
+                line_capturing_precolon = true;
+                line_prefix_len = 0;
+                formatted_after_colon = false;
+                space_run = 0;
+                ignore_until_eol = false;
+                continue;
+            }
+
+            if (ignore_until_eol) {
+                continue; // skip characters until newline resets state
+            }
+
+            if (formatted_after_colon) {
+                // Read only hex area, stop at first double space which precedes ASCII gutter
+                if (c == ' ') {
+                    if (space_run < 255) space_run += 1;
+                    if (space_run >= 2) {
+                        formatted_after_colon = false; // stop hex parsing for this line
+                        ignore_until_eol = true; // ignore ASCII gutter
+                        continue;
+                    }
+                    continue; // ignore single spaces
+                } else {
+                    space_run = 0;
+                }
+                var valh: u8 = undefined;
+                if (c >= '0' and c <= '9') {
+                    valh = c - '0';
+                } else if (c >= 'a' and c <= 'f') {
+                    valh = 10 + (c - 'a');
+                } else if (c >= 'A' and c <= 'F') {
+                    valh = 10 + (c - 'A');
+                } else {
+                    continue; // ignore separators
+                }
+                try consumeNibble.go(valh, &have_high, &high_nib, w);
+                continue;
+            }
+
+            if (line_capturing_precolon) {
+                // Accumulate up to a limit while we decide if this is a formatted line
+                if (c == ':') {
+                    if (line_prefix_len == 8) {
+                        // Verify first 8 were hex digits
+                        var ok = true;
+                        var k: usize = 0;
+                        while (k < 8) : (k += 1) {
+                            const ch = line_prefix[k];
+                            if (!((ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F'))) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if (ok) {
+                            // Recognize formatted line; start parsing hex after colon
+                            formatted_after_colon = true;
+                            line_capturing_precolon = false;
+                            space_run = 0;
+                            // There is usually a single space after ':' before hex digits; we'll skip it naturally.
+                            continue;
+                        }
+                    }
+                    // Not a formatted offset; fall through to treat prefix + ':' as plain text: process buffer then this char
+                    // First process buffered prefix as plain hex
+                    var j2: usize = 0;
+                    while (j2 < line_prefix_len) : (j2 += 1) {
+                        const pc = line_prefix[j2];
+                        var valp2: u8 = undefined;
+                        if (pc >= '0' and pc <= '9') {
+                            valp2 = pc - '0';
+                        } else if (pc >= 'a' and pc <= 'f') {
+                            valp2 = 10 + (pc - 'a');
+                        } else if (pc >= 'A' and pc <= 'F') {
+                            valp2 = 10 + (pc - 'A');
+                        } else {
+                            continue;
+                        }
+                        try consumeNibble.go(valp2, &have_high, &high_nib, w);
+                    }
+                    line_capturing_precolon = false;
+                    line_prefix_len = 0;
+                    // Now process ':' as plain (ignored)
+                    continue;
+                }
+
+                if (line_prefix_len < line_prefix.len) {
+                    line_prefix[line_prefix_len] = c;
+                    line_prefix_len += 1;
+                } else {
+                    // Buffer too long without colon: assume plain, flush buffer and continue in plain mode
+                    var j3: usize = 0;
+                    while (j3 < line_prefix_len) : (j3 += 1) {
+                        const pc = line_prefix[j3];
+                        var valp3: u8 = undefined;
+                        if (pc >= '0' and pc <= '9') {
+                            valp3 = pc - '0';
+                        } else if (pc >= 'a' and pc <= 'f') {
+                            valp3 = 10 + (pc - 'a');
+                        } else if (pc >= 'A' and pc <= 'F') {
+                            valp3 = 10 + (pc - 'A');
+                        } else {
+                            continue;
+                        }
+                        try consumeNibble.go(valp3, &have_high, &high_nib, w);
+                    }
+                    line_capturing_precolon = false;
+                    line_prefix_len = 0;
+                    // fall through to treat current c in plain mode below
+                }
+
+                // While capturing, do not process current char yet (unless buffer overflowed, which we handled)
+                continue;
+            }
+
+            // Plain mode for this line (no formatted offset detected)
+            var val_plain: u8 = undefined;
+            if (c >= '0' and c <= '9') {
+                val_plain = c - '0';
+            } else if (c >= 'a' and c <= 'f') {
+                val_plain = 10 + (c - 'a');
+            } else if (c >= 'A' and c <= 'F') {
+                val_plain = 10 + (c - 'A');
+            } else {
+                continue;
+            }
+            try consumeNibble.go(val_plain, &have_high, &high_nib, w);
+        }
+    }
+
+    if (have_high) return error.OddNibbleCount;
+}
+
 test "hexdump default 16 bytes lowercase" {
     var data: [16]u8 = undefined;
     for (&data, 0..) |*b, i| b.* = @as(u8, @intCast(i));
@@ -570,4 +763,81 @@ test "hexdump colorize with uppercase hex digits" {
 
     const got = list.items;
     try std.testing.expectEqualStrings(expected, got);
+}
+
+// Reverse tests
+
+// Roundtrip using our formatted hexdump view (small sample)
+// bytes -> hexdump (formatted) -> reverse -> bytes
+test "reverse roundtrip tiny via hexdump" {
+    const src = [_]u8{ 0x00, 0x01, 0x0a, 0xff };
+
+    // Produce formatted hexdump into a buffer
+    var dump_buf: std.ArrayList(u8) = .empty;
+    defer dump_buf.deinit(std.testing.allocator);
+    const dw = dump_buf.writer(std.testing.allocator);
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    var r1 = SliceReader{ .buf = src[0..] };
+    try hexdump(&r1, dw, .{ .cols = 4, .group = 1 });
+
+    // Now reverse the dump
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(std.testing.allocator);
+    const ow = out.writer(std.testing.allocator);
+
+    var r2 = SliceReader{ .buf = dump_buf.items };
+    try reverse(&r2, ow);
+
+    try std.testing.expectEqualSlices(u8, src[0..], out.items);
+}
+
+// Roundtrip using our formatted hexdump view
+// bytes -> hexdump (formatted) -> reverse -> bytes
+// Confirms -r understands formatted lines and ignores ASCII gutter
+test "roundtrip via formatted hexdump" {
+    // Generate some bytes
+    var data: [37]u8 = undefined;
+    for (&data, 0..) |*b, i| b.* = @intCast((i * 9 + 5) & 0xff);
+
+    // Produce formatted hexdump into a buffer
+    var dump_buf: std.ArrayList(u8) = .empty;
+    defer dump_buf.deinit(std.testing.allocator);
+    const dw = dump_buf.writer(std.testing.allocator);
+
+    const SliceReader = struct {
+        buf: []const u8,
+        idx: usize = 0,
+        pub fn read(self: *@This(), out: []u8) !usize {
+            const n = @min(out.len, self.buf.len - self.idx);
+            if (n == 0) return 0;
+            @memcpy(out[0..n], self.buf[self.idx .. self.idx + n]);
+            self.idx += n;
+            return n;
+        }
+    };
+
+    var r1 = SliceReader{ .buf = data[0..] };
+    try hexdump(&r1, dw, .{ .cols = 16, .group = 2 });
+
+    // Now reverse the dump
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(std.testing.allocator);
+    const ow = out.writer(std.testing.allocator);
+
+    var r2 = SliceReader{ .buf = dump_buf.items };
+    try reverse(&r2, ow);
+
+    try std.testing.expectEqualSlices(u8, data[0..], out.items);
 }
