@@ -13,7 +13,7 @@ pub fn bufferedPrint() !void {
 // Public API for hexdump (M1)
 pub const Options = struct {
     cols: usize = 16, // bytes per line
-    group: usize = 1, // bytes per group (1,2,4,8)
+    group: usize = 2, // bytes per group (1,2,4,8) - default 2
     uppercase: bool = false,
     limit: ?usize = null, // total bytes to process
     skip: usize = 0, // bytes to skip from input before dumping
@@ -385,7 +385,7 @@ test "hexdump default 16 bytes lowercase" {
 
     const got = list.items;
     const expected =
-        "00000000: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f  ................\n";
+        "00000000: 0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  ................\n";
     try std.testing.expectEqualStrings(expected, got);
 }
 
@@ -408,9 +408,9 @@ test "hexdump 2 cols uppercase simple" {
     };
 
     var r = SliceReader{ .buf = input[0..] };
-    try hexdump(&r, lw, .{ .cols = 2, .uppercase = true });
+    try hexdump(&r, lw, .{ .cols = 2, .uppercase = true, .group = 2 });
     const got = list.items;
-    const expected = "00000000: 20 7E   ~\n";
+    const expected = "00000000: 207E   ~\n";
     try std.testing.expectEqualStrings(expected, got);
 }
 
@@ -633,7 +633,7 @@ test "hexdump colorize -R basic mapping" {
     };
 
     var r = SliceReader{ .buf = input[0..] };
-    try hexdump(&r, lw, .{ .cols = 3, .colorize = true });
+    try hexdump(&r, lw, .{ .cols = 3, .colorize = true, .group = 1 });
 
     const RESET = "\x1b[0m";
     const W = "\x1b[97m"; // 0x00
@@ -673,7 +673,7 @@ test "hexdump colorize mapping for TAB/LF/CR is yellow" {
     };
 
     var r = SliceReader{ .buf = input[0..] };
-    try hexdump(&r, lw, .{ .cols = 3, .colorize = true });
+    try hexdump(&r, lw, .{ .cols = 3, .colorize = true, .group = 1 });
 
     const RESET = "\x1b[0m";
     const Y = "\x1b[33m";
@@ -711,7 +711,7 @@ test "hexdump colorize mapping: non-printable red, printable green" {
     };
 
     var r = SliceReader{ .buf = input[0..] };
-    try hexdump(&r, lw, .{ .cols = 2, .colorize = true });
+    try hexdump(&r, lw, .{ .cols = 2, .colorize = true, .group = 1 });
 
     const RESET = "\x1b[0m";
     const R = "\x1b[31m";
@@ -748,7 +748,7 @@ test "hexdump colorize with uppercase hex digits" {
     };
 
     var r = SliceReader{ .buf = input[0..] };
-    try hexdump(&r, lw, .{ .cols = 2, .uppercase = true, .colorize = true });
+    try hexdump(&r, lw, .{ .cols = 2, .uppercase = true, .colorize = true, .group = 1 });
 
     const RESET = "\x1b[0m";
     const Y = "\x1b[33m";

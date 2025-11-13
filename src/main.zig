@@ -6,7 +6,7 @@ fn printUsage(stdout: anytype) !void {
         "Usage: xxd-zig [options] [infile [outfile]]\n" ++
             "Options:\n" ++
             "  -c <cols>    bytes per line (default 16)\n" ++
-            "  -g <n>       bytes per group: 1,2,4,8 (default 1)\n" ++
+            "  -g <n>       bytes per group: 1,2,4,8 (default 2)\n" ++
             "  -u           uppercase hex\n" ++
             "  -r           reverse: convert hex dump/plain hex to binary (reads from stdin/file, writes raw bytes)\n" ++
             "  -R <when>    colorize output by byte class; <when> is one of: always, auto, never (default: auto)\n" ++
